@@ -6,7 +6,7 @@ import akka.actor.{Actor, ActorLogging, ActorSystem, Address, Props}
 import akka.cluster.Cluster
 
 @Singleton
-class ClusterEventListenerComponent @Inject()(actorSystem: ActorSystem) {
+class ClusterEventListenerComponent @Inject() (actorSystem: ActorSystem) {
   val clusterListener = actorSystem.actorOf(ClusterEventListener.props())
 }
 
@@ -25,7 +25,12 @@ class ClusterEventListener extends Actor with ActorLogging {
   val cluster = Cluster(context.system)
 
   override def preStart(): Unit = {
-    cluster.subscribe(self, initialStateMode = InitialStateAsEvents, classOf[MemberEvent], classOf[UnreachableMember])
+    cluster.subscribe(
+      self,
+      initialStateMode = InitialStateAsEvents,
+      classOf[MemberEvent],
+      classOf[UnreachableMember]
+    )
   }
 
   override def postStop(): Unit = {
@@ -46,10 +51,9 @@ class ClusterEventListener extends Actor with ActorLogging {
     case MemberRemoved(member, previousStatus) =>
       log.info("Member is Removed: {} after {}", member.address, previousStatus)
 
-    case _: MemberEvent  => // ignore
+    case _: MemberEvent => // ignore
 
     case GetClusterNodes => sender() ! nodes
   }
-
 
 }

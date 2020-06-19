@@ -2,51 +2,47 @@ package services
 
 import javax.inject.{Inject, Singleton}
 
-import akka.actor.{Actor, ActorLogging, ActorSystem, PoisonPill, Props}
-import akka.contrib.pattern.{ClusterSingletonManager, ClusterSingletonProxy}
+import akka.actor.ActorSystem
+import akka.cluster.typed.ClusterSingleton
+import akka.cluster.typed.SingletonActor
+import akka.actor.typed.Behavior
+import akka.actor.typed.scaladsl.Behaviors
+import akka.actor.typed.SupervisorStrategy
+import akka.actor.typed.ActorRef
+import play.api.ApplicationLoader
+import play.api.libs.concurrent.AkkaGuiceSupport
+import akka.cluster.sharding.typed.scaladsl.ClusterSharding
+import akka.actor.typed.scaladsl.adapter._
 
 @Singleton
 class CounterComponent @Inject() (actorSystem: ActorSystem) {
 
-  // Initiates singleton in the Cluster
-  actorSystem.actorOf(ClusterSingletonManager.props(
-    singletonProps = Props(classOf[Counter]),
-    singletonName = "counter",
-    role = None,
-    terminationMessage = PoisonPill),
-    name = "counter-singleton")
+  val singletonManager = ClusterSingleton(actorSystem.toTyped)
 
-  // Initiates proxy for singleton in the current node
-  val counter =
-    actorSystem.actorOf(ClusterSingletonProxy.props(
-      singletonPath = "/user/counter-singleton/counter",
-      role = None),
-      name = "counter-proxy")
-
+  val counter: ActorRef[Counter.Command] = singletonManager.init(
+    SingletonActor(
+      Behaviors
+        .supervise(Counter())
+        .onFailure[Exception](SupervisorStrategy.restart),
+      "GlobalCounter"
+    )
+  )
 }
 
 object Counter {
-  case object Count
+  sealed trait Command
+  case class Count(replyTo: ActorRef[Reply]) extends Command
+  case class Reply(value: Int)
 
-  def props(): Props = {
-    Props(classOf[Counter])
+  def apply(): Behavior[Command] = {
+    def updated(value: Int): Behavior[Command] =
+      Behaviors.receive[Command] {
+        case (context, Count(replyTo)) =>
+          context.log.info(s"Recieved message")
+          replyTo ! Reply(value)
+          updated(value + 1)
+      }
+
+    updated(0)
   }
 }
-
-class Counter extends Actor with ActorLogging {
-
-  import Counter._
-
-  def receive = handleMsg(0)
-
-  def handleMsg(count: Int): Receive = {
-    case Count => {
-      val newCount = count + 1
-      log.info("Msg received from {}, current count {}", sender(), newCount)
-      sender() ! newCount
-      context.become(handleMsg(newCount))
-    }
-  }
-
-}
-

@@ -5,6 +5,7 @@ bin/
 /lib/
 /logs/
 /modules
+/project/project/target
 /project/target
 /target
 tmp/
@@ -14,3 +15,6 @@ server.pid
 /dist/
 .cache
 /.idea
+/.bloop
+/.metals
+/project/metals.sbt

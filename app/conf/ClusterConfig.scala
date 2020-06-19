@@ -2,7 +2,7 @@ package conf
 
 import com.typesafe.config.{Config, ConfigFactory, ConfigValueFactory}
 
-import scala.collection.JavaConversions._
+import scala.jdk.CollectionConverters._
 
 object ClusterConfig {
 
@@ -30,9 +30,10 @@ object ClusterConfig {
     }
 
     def getSeeds(actorSystemName: String, port: Int): List[String] = {
-      ec2.getSiblingInstancesIps().map { ips =>
-        ips.map(ip => s"akka.tcp://$actorSystemName@$ip:$port")
-      }.get
+      ec2
+        .getSiblingInstancesIps()
+        .map { ips => ips.map(ip => s"akka.tcp://$actorSystemName@$ip:$port") }
+        .get
     }
 
     val actorSystemName = config.getString("play.akka.actor-system")
@@ -42,10 +43,20 @@ object ClusterConfig {
     val seeds = getSeeds(actorSystemName, port)
 
     val overrideConfig =
-      ConfigFactory.empty()
-        .withValue("akka.remote.netty.tcp.hostname", ConfigValueFactory.fromAnyRef(host))
-        .withValue("akka.remote.netty.tcp.port", ConfigValueFactory.fromAnyRef(port))
-        .withValue("akka.cluster.seed-nodes", ConfigValueFactory.fromIterable(seeds))
+      ConfigFactory
+        .empty()
+        .withValue(
+          "akka.remote.netty.tcp.hostname",
+          ConfigValueFactory.fromAnyRef(host)
+        )
+        .withValue(
+          "akka.remote.netty.tcp.port",
+          ConfigValueFactory.fromAnyRef(port)
+        )
+        .withValue(
+          "akka.cluster.seed-nodes",
+          ConfigValueFactory.fromIterable(seeds.asJava)
+        )
 
     overrideConfig withFallback config
   }
