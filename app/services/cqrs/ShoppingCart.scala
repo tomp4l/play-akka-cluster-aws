@@ -1,4 +1,4 @@
-package sevices.cqrs
+package services.cqrs
 
 import java.time.Instant
 

@@ -32,6 +32,7 @@ libraryDependencies ++= {
     "com.lightbend.akka" %% "akka-projection-eventsourced" % akkaProjectionVersion,
     "com.lightbend.akka" %% "akka-projection-slick" % akkaProjectionVersion,
     "com.github.dnvriend" %% "akka-persistence-jdbc" % "3.5.3",
+    "com.typesafe.play" %% "play-slick" % "5.0.0",
     "org.postgresql" % "postgresql" % "42.2.14",
     "com.amazonaws" % "aws-java-sdk" % "1.7.8"
   )

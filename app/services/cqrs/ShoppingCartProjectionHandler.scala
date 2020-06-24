@@ -1,4 +1,4 @@
-package sevices.cqrs
+package services.cqrs
 
 import akka.Done
 import akka.actor.typed.ActorSystem

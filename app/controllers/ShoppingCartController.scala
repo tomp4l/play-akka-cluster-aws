@@ -18,10 +18,10 @@ import akka.cluster.sharding.typed.scaladsl.ClusterSharding
 import akka.actor.ActorSystem
 
 import akka.actor.typed.scaladsl.adapter._
-import sevices.cqrs.ShoppingCart
-import sevices.cqrs.ShoppingCart.Accepted
-import sevices.cqrs.ShoppingCart.Rejected
-import sevices.cqrs.ShoppingCart.Summary
+import services.cqrs.ShoppingCart
+import services.cqrs.ShoppingCart.Accepted
+import services.cqrs.ShoppingCart.Rejected
+import services.cqrs.ShoppingCart.Summary
 
 class ShoppingCartController @Inject() (
     counterComponent: CounterComponent,

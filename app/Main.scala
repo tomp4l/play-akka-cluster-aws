@@ -17,41 +17,59 @@ import akka.cluster.typed.Cluster
 import akka.projection.{ProjectionBehavior, ProjectionId}
 import akka.projection.eventsourced.EventEnvelope
 import akka.projection.eventsourced.scaladsl.EventSourcedProvider
+import akka.persistence.jdbc
 import com.typesafe.config.Config
 import com.typesafe.config.ConfigFactory
 import akka.actor.typed.SpawnProtocol
 import scala.concurrent.ExecutionContext
 import akka.util.Timeout
-import sevices.cqrs.ShoppingCart
-import sevices.cqrs.EventProcessorSettings
+import services.cqrs.ShoppingCart
+import services.cqrs.EventProcessorSettings
 import akka.actor.typed.ActorRef
+import akka.persistence.jdbc.query.scaladsl.JdbcReadJournal
+import akka.projection.slick.SlickProjection
+import akka.projection.slick.AtLeastOnceSlickProjection
+import slick.basic.DatabaseConfig
+import services.cqrs.ShoppingCartProjectionHandler
+import akka.persistence.query.Offset
+import slick.jdbc.JdbcProfile
+import scala.reflect.ClassTag
+import play.api.db.slick.DatabaseConfigProvider
+import com.google.inject.Provides
+import play.api.libs.concurrent.ActorModule
 @Singleton final class Main @Inject() (
     val mainActor: ActorRef[Main.NotUsed]
 )
 
-object Main {
+object Main extends ActorModule {
 
-  // def createProjectionFor(
-  //     system: ActorSystem[_],
-  //     settings: EventProcessorSettings,
-  //     index: Int
-  // ): AtLeastOnceCassandraProjection[EventEnvelope[ShoppingCart.Event]] = {
-  //   val tag = s"${settings.tagPrefix}-$index"
-  //   val sourceProvider = EventSourcedProvider.eventsByTag[ShoppingCart.Event](
-  //     system = system,
-  //     readJournalPluginId = CassandraReadJournal.Identifier,
-  //     tag = tag
-  //   )
-  //   CassandraProjection.atLeastOnce(
-  //     projectionId = ProjectionId("shopping-carts", tag),
-  //     sourceProvider,
-  //     handler = new ShoppingCartProjectionHandler(tag, system)
-  //   )
-  // }
+  type Message = NotUsed
+
+  def createProjectionFor[P <: JdbcProfile: ClassTag](
+      system: ActorSystem[_],
+      settings: EventProcessorSettings,
+      dbConfig: DatabaseConfig[P],
+      index: Int
+  ): AtLeastOnceSlickProjection[EventEnvelope[ShoppingCart.Event]] = {
+    val tag = s"${settings.tagPrefix}-$index"
+    val sourceProvider = EventSourcedProvider.eventsByTag[ShoppingCart.Event](
+      system = system,
+      readJournalPluginId = JdbcReadJournal.Identifier,
+      tag = tag
+    )
+    SlickProjection.atLeastOnce[Offset, EventEnvelope[ShoppingCart.Event], P](
+      projectionId = ProjectionId("shopping-carts", tag),
+      sourceProvider,
+      dbConfig,
+      handler = new ShoppingCartProjectionHandler(tag, system)
+    )
+  }
 
   sealed trait NotUsed
 
-  def apply(): Behavior[NotUsed] = {
+  def apply[P <: JdbcProfile: ClassTag](
+      dbConfig: DatabaseConfig[P]
+  ): Behavior[NotUsed] = {
     Behaviors.setup[NotUsed] { context =>
       val system = context.system
 
@@ -69,16 +87,24 @@ object Main {
             shardingSettings.withRole("read-model")
           )
 
-        // ShardedDaemonProcess(system).init(
-        //   name = "ShoppingCartProjection",
-        //   settings.parallelism,
-        //   n => ProjectionBehavior(createProjectionFor(system, settings, n)),
-        //   shardedDaemonProcessSettings,
-        //   Some(ProjectionBehavior.Stop)
-        // )
+        ShardedDaemonProcess(system).init(
+          name = "ShoppingCartProjection",
+          settings.parallelism,
+          n =>
+            ProjectionBehavior(
+              createProjectionFor(system, settings, dbConfig, n)
+            ),
+          shardedDaemonProcessSettings,
+          Some(ProjectionBehavior.Stop)
+        )
       }
 
       Behaviors.empty
     }
+  }
+
+  @Provides
+  def create(dbConfigProvider: DatabaseConfigProvider): Behavior[NotUsed] = {
+    Main(dbConfigProvider.get[JdbcProfile])
   }
 }
