@@ -19,6 +19,7 @@ unmanagedResourceDirectories in Test += baseDirectory.value / "target/web/public
 
 libraryDependencies ++= {
   val akkaVersion = "2.6.6"
+  val akkaProjectionVersion = "0.2"
   Seq(
     "com.typesafe.akka" %% "akka-cluster-typed" % akkaVersion,
     "com.typesafe.akka" %% "akka-slf4j" % akkaVersion,
@@ -26,6 +27,12 @@ libraryDependencies ++= {
     "com.typesafe.akka" %% "akka-cluster-sharding" % akkaVersion,
     "com.typesafe.akka" %% "akka-persistence" % akkaVersion,
     "com.typesafe.akka" %% "akka-cluster-sharding-typed" % akkaVersion,
+    "com.typesafe.akka" %% "akka-persistence-typed" % akkaVersion,
+    "com.typesafe.akka" %% "akka-persistence-query" % akkaVersion,
+    "com.lightbend.akka" %% "akka-projection-eventsourced" % akkaProjectionVersion,
+    "com.lightbend.akka" %% "akka-projection-slick" % akkaProjectionVersion,
+    "com.github.dnvriend" %% "akka-persistence-jdbc" % "3.5.3",
+    "org.postgresql" % "postgresql" % "42.2.14",
     "com.amazonaws" % "aws-java-sdk" % "1.7.8"
   )
 }

@@ -32,6 +32,7 @@ class CounterComponent @Inject() (actorSystem: ActorSystem) {
 object Counter {
   sealed trait Command
   case class Count(replyTo: ActorRef[Reply]) extends Command
+  case class Blah() extends Command
   case class Reply(value: Int)
 
   def apply(): Behavior[Command] = {

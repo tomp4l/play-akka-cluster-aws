@@ -7,6 +7,12 @@ GET     /                           @controllers.Application.index()
 GET     /cluster/nodes              @controllers.ClusterController.listClusterNodes()
 POST    /cluster/singleton/count    @controllers.CounterController.count()
 
+POST    /shopping-cart/:id/add-item              @controllers.ShoppingCartController.addItem(id)
+POST    /shopping-cart/:id/remove-item           @controllers.ShoppingCartController.removeItem(id)
+POST    /shopping-cart/:id/adjust-item-quantity  @controllers.ShoppingCartController.adjustItemQuantity(id)
+POST    /shopping-cart/:id/checkout              @controllers.ShoppingCartController.checkout(id)
+GET     /shopping-cart/:id                       @controllers.ShoppingCartController.get(id)
+
 # Map static resources from the /public folder to the /assets URL path
 GET     /assets/*file               controllers.Assets.at(path="/public", file)
 
