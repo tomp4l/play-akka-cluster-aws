@@ -17,6 +17,15 @@ import akka.persistence.typed.scaladsl.Effect
 import akka.persistence.typed.scaladsl.EventSourcedBehavior
 import akka.persistence.typed.scaladsl.ReplyEffect
 
+import services.cqrs.domain.{ShoppingCart => ShoppingCartDomain}
+import services.cqrs.domain.OpenShoppingCart
+import services.cqrs.domain.CheckedOutShoppingCart
+import services.cqrs.ShoppingCart.AddItem
+import services.cqrs.ShoppingCart.RemoveItem
+import services.cqrs.ShoppingCart.AdjustItemQuantity
+import services.cqrs.ShoppingCart.Checkout
+import services.cqrs.ShoppingCart.Get
+
 /**
   * This is an event sourced actor. It has a state, [[ShoppingCart.State]], which
   * stores the current shopping cart items and whether it's checked out.
@@ -34,44 +43,20 @@ import akka.persistence.typed.scaladsl.ReplyEffect
 object ShoppingCart {
 
   /**
-    * The current state held by the persistent entity.
-    */
-  final case class State(items: Map[String, Int], checkoutDate: Option[Instant])
-      extends CborSerializable {
-
-    def isCheckedOut: Boolean =
-      checkoutDate.isDefined
-
-    def hasItem(itemId: String): Boolean =
-      items.contains(itemId)
-
-    def isEmpty: Boolean =
-      items.isEmpty
-
-    def updateItem(itemId: String, quantity: Int): State = {
-      quantity match {
-        case 0 => copy(items = items - itemId)
-        case _ => copy(items = items + (itemId -> quantity))
-      }
-    }
-
-    def removeItem(itemId: String): State =
-      copy(items = items - itemId)
-
-    def checkout(now: Instant): State =
-      copy(checkoutDate = Some(now))
-
-    def toSummary: Summary =
-      Summary(items, isCheckedOut)
-  }
-  object State {
-    val empty = State(items = Map.empty, checkoutDate = None)
-  }
-
-  /**
     * This interface defines all the commands that the ShoppingCart persistent actor supports.
     */
   sealed trait Command extends CborSerializable
+
+  type Event = ShoppingCartDomain.Event
+  type State = ShoppingCartDomain
+
+  implicit class ToSummary(state: State) {
+    def toSummary = state match {
+      case OpenShoppingCart(cartId, items) => Summary(items, false)
+      case CheckedOutShoppingCart(cartId, items, checkoutOutAt) =>
+        Summary(items, true)
+    }
+  }
 
   /**
     * A command to add an item to the cart.
@@ -122,26 +107,6 @@ object ShoppingCart {
 
   final case class Rejected(reason: String) extends Confirmation
 
-  /**
-    * This interface defines all the events that the ShoppingCart supports.
-    */
-  sealed trait Event extends CborSerializable {
-    def cartId: String
-  }
-
-  final case class ItemAdded(cartId: String, itemId: String, quantity: Int)
-      extends Event
-
-  final case class ItemRemoved(cartId: String, itemId: String) extends Event
-
-  final case class ItemQuantityAdjusted(
-      cartId: String,
-      itemId: String,
-      newQuantity: Int
-  ) extends Event
-
-  final case class CheckedOut(cartId: String, eventTime: Instant) extends Event
-
   val EntityKey: EntityTypeKey[Command] = EntityTypeKey[Command]("ShoppingCart")
 
   def init(
@@ -162,15 +127,19 @@ object ShoppingCart {
       eventProcessorTags: Set[String]
   ): Behavior[Command] = {
     EventSourcedBehavior
-      .withEnforcedReplies[Command, Event, State](
+      .withEnforcedReplies[
+        Command,
+        ShoppingCartDomain.Event,
+        ShoppingCartDomain
+      ](
         PersistenceId(EntityKey.name, cartId),
-        State.empty,
+        ShoppingCartDomain.empty(cartId),
         (state, command) =>
-          //The shopping cart behavior changes if it's checked out or not.
-          // The commands are handled differently for each case.
-          if (state.isCheckedOut) checkedOutShoppingCart(cartId, state, command)
-          else openShoppingCart(cartId, state, command),
-        (state, event) => handleEvent(state, event)
+          state match {
+            case open: OpenShoppingCart             => openShoppingCart(open, command)
+            case checkedOut: CheckedOutShoppingCart => checkedOutShoppingCart(checkedOut, command)
+          },
+        (state, event) => state.handleEvent(event)
       )
       .withTagger(_ => eventProcessorTags)
       .onPersistFailure(
@@ -179,96 +148,83 @@ object ShoppingCart {
   }
 
   private def openShoppingCart(
-      cartId: String,
-      state: State,
+      cart: OpenShoppingCart,
       command: Command
   ): ReplyEffect[Event, State] =
     command match {
       case AddItem(itemId, quantity, replyTo) =>
-        if (state.hasItem(itemId))
-          Effect.reply(replyTo)(
-            Rejected(s"Item '$itemId' was already added to this shopping cart")
-          )
-        else if (quantity <= 0)
-          Effect.reply(replyTo)(Rejected("Quantity must be greater than zero"))
-        else
-          Effect
-            .persist(ItemAdded(cartId, itemId, quantity))
-            .thenReply(replyTo)(updatedCart => Accepted(updatedCart.toSummary))
-
+        cart.addItem(itemId, quantity) match {
+          case Left(error) =>
+            Effect.reply(replyTo)(
+              Rejected(error)
+            )
+          case Right(event) =>
+            Effect
+              .persist(event)
+              .thenReply(replyTo)(updatedCart =>
+                Accepted(updatedCart.toSummary)
+              )
+        }
       case RemoveItem(itemId, replyTo) =>
-        if (state.hasItem(itemId))
-          Effect
-            .persist(ItemRemoved(cartId, itemId))
-            .thenReply(replyTo)(updatedCart => Accepted(updatedCart.toSummary))
-        else
-          Effect.reply(replyTo)(
-            Accepted(state.toSummary)
-          ) // removing an item is idempotent
+        cart.removeItem(itemId) match {
+          case None =>
+            Effect.reply(replyTo)(
+              Accepted(cart.toSummary)
+            )
+          case Some(event) =>
+            Effect
+              .persist(event)
+              .thenReply(replyTo)(updatedCart =>
+                Accepted(updatedCart.toSummary)
+              )
+        }
 
       case AdjustItemQuantity(itemId, quantity, replyTo) =>
-        if (quantity <= 0)
-          Effect.reply(replyTo)(Rejected("Quantity must be greater than zero"))
-        else if (state.hasItem(itemId))
-          Effect
-            .persist(ItemQuantityAdjusted(cartId, itemId, quantity))
-            .thenReply(replyTo)(updatedCart => Accepted(updatedCart.toSummary))
-        else
-          Effect.reply(replyTo)(
-            Rejected(
-              s"Cannot adjust quantity for item '$itemId'. Item not present on cart"
+        cart.adjustQuantity(itemId, quantity) match {
+          case Left(error) =>
+            Effect.reply(replyTo)(
+              Rejected(error)
             )
-          )
+          case Right(event) =>
+            Effect
+              .persist(event)
+              .thenReply(replyTo)(updatedCart =>
+                Accepted(updatedCart.toSummary)
+              )
+        }
 
       case Checkout(replyTo) =>
-        if (state.isEmpty)
-          Effect.reply(replyTo)(
-            Rejected("Cannot checkout an empty shopping cart")
-          )
-        else
-          Effect
-            .persist(CheckedOut(cartId, Instant.now()))
-            .thenReply(replyTo)(updatedCart => Accepted(updatedCart.toSummary))
+        cart.checkout() match {
+          case Left(error) =>
+            Effect.reply(replyTo)(
+              Rejected(error)
+            )
+          case Right(event) =>
+            Effect
+              .persist(event)
+              .thenReply(replyTo)(updatedCart =>
+                Accepted(updatedCart.toSummary)
+              )
+        }
 
       case Get(replyTo) =>
-        Effect.reply(replyTo)(state.toSummary)
+        Effect.reply(replyTo)(cart.toSummary)
     }
 
   private def checkedOutShoppingCart(
-      cartId: String,
-      state: State,
+      cart: CheckedOutShoppingCart,
       command: Command
-  ): ReplyEffect[Event, State] =
-    command match {
-      case Get(replyTo) =>
-        Effect.reply(replyTo)(state.toSummary)
-      case cmd: AddItem =>
-        Effect.reply(cmd.replyTo)(
-          Rejected("Can't add an item to an already checked out shopping cart")
-        )
-      case cmd: RemoveItem =>
-        Effect.reply(cmd.replyTo)(
-          Rejected(
-            "Can't remove an item from an already checked out shopping cart"
-          )
-        )
-      case cmd: AdjustItemQuantity =>
-        Effect.reply(cmd.replyTo)(
-          Rejected("Can't adjust item on an already checked out shopping cart")
-        )
-      case cmd: Checkout =>
-        Effect.reply(cmd.replyTo)(
-          Rejected("Can't checkout already checked out shopping cart")
-        )
-    }
-
-  private def handleEvent(state: State, event: Event) = {
-    event match {
-      case ItemAdded(_, itemId, quantity) => state.updateItem(itemId, quantity)
-      case ItemRemoved(_, itemId)         => state.removeItem(itemId)
-      case ItemQuantityAdjusted(_, itemId, quantity) =>
-        state.updateItem(itemId, quantity)
-      case CheckedOut(_, eventTime) => state.checkout(eventTime)
-    }
+  ): ReplyEffect[Event, State] = command match {
+    case AddItem(itemId, quantity, replyTo) =>
+      Effect.reply(replyTo)(Rejected("Cart is checked out"))
+    case RemoveItem(itemId, replyTo) =>
+      Effect.reply(replyTo)(Rejected("Cart is checked out"))
+    case AdjustItemQuantity(itemId, quantity, replyTo) =>
+      Effect.reply(replyTo)(Rejected("Cart is checked out"))
+    case Checkout(replyTo) =>
+      Effect.reply(replyTo)(Rejected("Cart is checked out"))
+    case Get(replyTo) =>
+      Effect.reply(replyTo)(cart.toSummary)
   }
+
 }

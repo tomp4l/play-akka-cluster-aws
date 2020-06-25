@@ -19,11 +19,12 @@ class ShoppingCartProjectionHandler(tag: String, system: ActorSystem[_])
   ): DBIO[Done] = {
 
     log.info(
-      "EventProcessor({}) consumed {} from {} with seqNr {}",
+      "EventProcessor({}) consumed {} from {} with seqNr {} at offset {}",
       tag,
       envelope.event,
       envelope.persistenceId,
-      envelope.sequenceNr
+      envelope.sequenceNr,
+      envelope.offset
     )
     system.eventStream ! EventStream.Publish(envelope.event)
     DBIO.successful(Done)

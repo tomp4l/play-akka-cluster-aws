@@ -37,6 +37,8 @@ import scala.reflect.ClassTag
 import play.api.db.slick.DatabaseConfigProvider
 import com.google.inject.Provides
 import play.api.libs.concurrent.ActorModule
+import akka.projection.StatusObserver
+import akka.projection.HandlerRecoveryStrategy
 @Singleton final class Main @Inject() (
     val mainActor: ActorRef[Main.NotUsed]
 )
@@ -50,14 +52,14 @@ object Main extends ActorModule {
       settings: EventProcessorSettings,
       dbConfig: DatabaseConfig[P],
       index: Int
-  ): AtLeastOnceSlickProjection[EventEnvelope[ShoppingCart.Event]] = {
+  ): SlickProjection[EventEnvelope[ShoppingCart.Event]] = {
     val tag = s"${settings.tagPrefix}-$index"
     val sourceProvider = EventSourcedProvider.eventsByTag[ShoppingCart.Event](
       system = system,
       readJournalPluginId = JdbcReadJournal.Identifier,
       tag = tag
     )
-    SlickProjection.atLeastOnce[Offset, EventEnvelope[ShoppingCart.Event], P](
+    SlickProjection.exactlyOnce[Offset, EventEnvelope[ShoppingCart.Event], P](
       projectionId = ProjectionId("shopping-carts", tag),
       sourceProvider,
       dbConfig,
