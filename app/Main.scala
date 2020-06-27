@@ -51,7 +51,9 @@ object Main extends ActorModule {
       settings: EventProcessorSettings,
       dbConfig: DatabaseConfig[P],
       index: Int
-  )(implicit system: ActorSystem[_]): Projection[EventEnvelope[ShoppingCart.Event]] = {
+  )(
+      implicit system: ActorSystem[_]
+  ): Projection[EventEnvelope[ShoppingCart.Event]] = {
     val tag = s"${settings.tagPrefix}-$index"
     val sourceProvider = EventSourcedProvider.eventsByTag[ShoppingCart.Event](
       system = system,

@@ -136,8 +136,9 @@ object ShoppingCart {
         ShoppingCartDomain.empty(cartId),
         (state, command) =>
           state match {
-            case open: OpenShoppingCart             => openShoppingCart(open, command)
-            case checkedOut: CheckedOutShoppingCart => checkedOutShoppingCart(checkedOut, command)
+            case open: OpenShoppingCart => openShoppingCart(open, command)
+            case checkedOut: CheckedOutShoppingCart =>
+              checkedOutShoppingCart(checkedOut, command)
           },
         (state, event) => state.handleEvent(event)
       )
@@ -153,60 +154,13 @@ object ShoppingCart {
   ): ReplyEffect[Event, State] =
     command match {
       case AddItem(itemId, quantity, replyTo) =>
-        cart.addItem(itemId, quantity) match {
-          case Left(error) =>
-            Effect.reply(replyTo)(
-              Rejected(error)
-            )
-          case Right(event) =>
-            Effect
-              .persist(event)
-              .thenReply(replyTo)(updatedCart =>
-                Accepted(updatedCart.toSummary)
-              )
-        }
+        cart.addItem(itemId, quantity).handle(replyTo)
       case RemoveItem(itemId, replyTo) =>
-        cart.removeItem(itemId) match {
-          case None =>
-            Effect.reply(replyTo)(
-              Accepted(cart.toSummary)
-            )
-          case Some(event) =>
-            Effect
-              .persist(event)
-              .thenReply(replyTo)(updatedCart =>
-                Accepted(updatedCart.toSummary)
-              )
-        }
-
+        cart.removeItem(itemId).handle(replyTo)
       case AdjustItemQuantity(itemId, quantity, replyTo) =>
-        cart.adjustQuantity(itemId, quantity) match {
-          case Left(error) =>
-            Effect.reply(replyTo)(
-              Rejected(error)
-            )
-          case Right(event) =>
-            Effect
-              .persist(event)
-              .thenReply(replyTo)(updatedCart =>
-                Accepted(updatedCart.toSummary)
-              )
-        }
-
+        cart.adjustQuantity(itemId, quantity).handle(replyTo)
       case Checkout(replyTo) =>
-        cart.checkout() match {
-          case Left(error) =>
-            Effect.reply(replyTo)(
-              Rejected(error)
-            )
-          case Right(event) =>
-            Effect
-              .persist(event)
-              .thenReply(replyTo)(updatedCart =>
-                Accepted(updatedCart.toSummary)
-              )
-        }
-
+        cart.checkout().handle(replyTo)
       case Get(replyTo) =>
         Effect.reply(replyTo)(cart.toSummary)
     }
@@ -227,4 +181,33 @@ object ShoppingCart {
       Effect.reply(replyTo)(cart.toSummary)
   }
 
+  implicit class EitherHandler(e: Either[String, Event]) {
+    def handle(replyTo: ActorRef[Confirmation]): ReplyEffect[Event, State] =
+      e match {
+        case Left(error) =>
+          Effect.reply(replyTo)(
+            Rejected(error)
+          )
+        case Right(event) =>
+          Effect
+            .persist(event)
+            .thenReply(replyTo)(updatedCart => Accepted(updatedCart.toSummary))
+      }
+
+  }
+
+  implicit class OptionHandler(o: Option[Event]) {
+    def handle(replyTo: ActorRef[Confirmation]): ReplyEffect[Event, State] =
+      o match {
+        case None =>
+          Effect.none.thenReply(replyTo)(updatedCart =>
+            Accepted(updatedCart.toSummary)
+          )
+        case Some(event) =>
+          Effect
+            .persist(event)
+            .thenReply(replyTo)(updatedCart => Accepted(updatedCart.toSummary))
+      }
+
+  }
 }

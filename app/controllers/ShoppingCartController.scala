@@ -22,18 +22,18 @@ import services.cqrs.ShoppingCart
 import services.cqrs.ShoppingCart.Accepted
 import services.cqrs.ShoppingCart.Rejected
 import services.cqrs.ShoppingCart.Summary
+import akka.pattern.AskTimeoutException
+import play.api.mvc.Result
 
 class ShoppingCartController @Inject() (
     counterComponent: CounterComponent,
     cc: ControllerComponents,
-    system: ActorSystem
+    sharding: ClusterSharding
 )(implicit ex: ExecutionContext, scheduler: Scheduler)
     extends AbstractController(cc) {
-
-  private val sharding = ClusterSharding(system.toTyped)
+  implicit val timeout: Timeout = Timeout(10.seconds)
 
   def addItem(cartId: String) = Action.async { request =>
-    implicit val timeout: Timeout = Timeout(5.seconds)
     val entityRef = sharding.entityRefFor(ShoppingCart.EntityKey, cartId)
     val (itemId, quantity) =
       request.body.asJson
@@ -41,31 +41,23 @@ class ShoppingCartController @Inject() (
           ((json \ "item_id").as[String], (json \ "quantity").as[Int])
         )
         .get
-    val reply: Future[ShoppingCart.Confirmation] =
+    val reply =
       entityRef.ask(ShoppingCart.AddItem(itemId, quantity, _))
 
-    reply.map({
-      case ShoppingCart.Accepted(summary) => Ok(summary.toString())
-      case Rejected(reason)               => BadRequest(reason)
-    })
+    reply.mapToResponse
   }
 
   def removeItem(cartId: String) = Action.async { request =>
-    implicit val timeout: Timeout = Timeout(5.seconds)
     val entityRef = sharding.entityRefFor(ShoppingCart.EntityKey, cartId)
     val itemId =
       request.body.asJson.map(json => ((json \ "item_id").as[String])).get
-    val reply: Future[ShoppingCart.Confirmation] =
+    val reply =
       entityRef.ask(ShoppingCart.RemoveItem(itemId, _))
 
-    reply.map({
-      case ShoppingCart.Accepted(summary) => Ok(summary.toString())
-      case Rejected(reason)               => BadRequest(reason)
-    })
+    reply.mapToResponse
   }
 
   def adjustItemQuantity(cartId: String) = Action.async { request =>
-    implicit val timeout: Timeout = Timeout(5.seconds)
     val entityRef = sharding.entityRefFor(ShoppingCart.EntityKey, cartId)
     val (itemId, quantity) =
       request.body.asJson
@@ -76,26 +68,18 @@ class ShoppingCartController @Inject() (
     val reply: Future[ShoppingCart.Confirmation] =
       entityRef.ask(ShoppingCart.AdjustItemQuantity(itemId, quantity, _))
 
-    reply.map({
-      case ShoppingCart.Accepted(summary) => Ok(summary.toString())
-      case Rejected(reason)               => BadRequest(reason)
-    })
+    reply.mapToResponse
   }
 
   def checkout(cartId: String) = Action.async { request =>
-    implicit val timeout: Timeout = Timeout(5.seconds)
     val entityRef = sharding.entityRefFor(ShoppingCart.EntityKey, cartId)
-    val reply: Future[ShoppingCart.Confirmation] =
+    val reply =
       entityRef.ask(ShoppingCart.Checkout(_))
 
-    reply.map({
-      case ShoppingCart.Accepted(summary) => Ok(summary.toString())
-      case Rejected(reason)               => BadRequest(reason)
-    })
+    reply.mapToResponse
   }
 
   def get(cartId: String) = Action.async { request =>
-    implicit val timeout: Timeout = Timeout(5.seconds)
     val entityRef = sharding.entityRefFor(ShoppingCart.EntityKey, cartId)
     val reply: Future[ShoppingCart.Summary] =
       entityRef.ask(ShoppingCart.Get(_))
@@ -104,5 +88,18 @@ class ShoppingCartController @Inject() (
       case Summary(items, checkedOut) =>
         Ok(items.toString() + " " + (if (checkedOut) "checked out" else "open"))
     })
+  }
+
+  implicit class MapToResponse(reply: Future[ShoppingCart.Confirmation]) {
+    def mapToResponse: Future[Result] =
+      reply
+        .map({
+          case ShoppingCart.Accepted(summary) => Ok(summary.toString())
+          case Rejected(reason)               => BadRequest(reason)
+        })
+        .recover({
+          case e: AskTimeoutException =>
+            InternalServerError("Request timed out")
+        })
   }
 }
