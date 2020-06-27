@@ -28,7 +28,6 @@ import services.cqrs.EventProcessorSettings
 import akka.actor.typed.ActorRef
 import akka.persistence.jdbc.query.scaladsl.JdbcReadJournal
 import akka.projection.slick.SlickProjection
-import akka.projection.slick.AtLeastOnceSlickProjection
 import slick.basic.DatabaseConfig
 import services.cqrs.ShoppingCartProjectionHandler
 import akka.persistence.query.Offset
@@ -39,6 +38,7 @@ import com.google.inject.Provides
 import play.api.libs.concurrent.ActorModule
 import akka.projection.StatusObserver
 import akka.projection.HandlerRecoveryStrategy
+import akka.projection.Projection
 @Singleton final class Main @Inject() (
     val mainActor: ActorRef[Main.NotUsed]
 )
@@ -48,11 +48,10 @@ object Main extends ActorModule {
   type Message = NotUsed
 
   def createProjectionFor[P <: JdbcProfile: ClassTag](
-      system: ActorSystem[_],
       settings: EventProcessorSettings,
       dbConfig: DatabaseConfig[P],
       index: Int
-  ): SlickProjection[EventEnvelope[ShoppingCart.Event]] = {
+  )(implicit system: ActorSystem[_]): Projection[EventEnvelope[ShoppingCart.Event]] = {
     val tag = s"${settings.tagPrefix}-$index"
     val sourceProvider = EventSourcedProvider.eventsByTag[ShoppingCart.Event](
       system = system,
@@ -63,7 +62,7 @@ object Main extends ActorModule {
       projectionId = ProjectionId("shopping-carts", tag),
       sourceProvider,
       dbConfig,
-      handler = new ShoppingCartProjectionHandler(tag, system)
+      handler = () => new ShoppingCartProjectionHandler(tag, system)
     )
   }
 
@@ -73,7 +72,7 @@ object Main extends ActorModule {
       dbConfig: DatabaseConfig[P]
   ): Behavior[NotUsed] = {
     Behaviors.setup[NotUsed] { context =>
-      val system = context.system
+      implicit val system = context.system
 
       val settings = EventProcessorSettings(system)
 
@@ -94,7 +93,7 @@ object Main extends ActorModule {
           settings.parallelism,
           n =>
             ProjectionBehavior(
-              createProjectionFor(system, settings, dbConfig, n)
+              createProjectionFor(settings, dbConfig, n)
             ),
           shardedDaemonProcessSettings,
           Some(ProjectionBehavior.Stop)

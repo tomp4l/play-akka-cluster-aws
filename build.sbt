@@ -19,7 +19,7 @@ unmanagedResourceDirectories in Test += baseDirectory.value / "target/web/public
 
 libraryDependencies ++= {
   val akkaVersion = "2.6.6"
-  val akkaProjectionVersion = "0.2"
+  val akkaProjectionVersion = "0.3"
   Seq(
     "com.typesafe.akka" %% "akka-cluster-typed" % akkaVersion,
     "com.typesafe.akka" %% "akka-slf4j" % akkaVersion,
